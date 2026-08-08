@@ -1,0 +1,9 @@
+.venv/
+.idea/
+instance/
+__pycache__/
+*.py[cod]
+.DS_Store
+.env
+*serviceAccount*.json
+firebase-key.json
