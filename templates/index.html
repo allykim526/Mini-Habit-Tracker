@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A simple Firebase-powered daily habit tracker">
+  <title>Habit Garden</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="tracker">
+    <nav class="topbar" aria-label="Habit Garden">
+      <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark" aria-hidden="true">✦</span> Habit Garden</a>
+      <span class="sync-status"><span aria-hidden="true"></span> Live sync</span>
+    </nav>
+    <header class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">DAILY PRACTICE</p>
+        <h1>Grow a little<br><em>every day.</em></h1>
+        <p class="intro">Small steps become strong roots. Add the habits you want to nurture and celebrate each one you finish.</p>
+      </div>
+      <div class="progress-card" aria-label="Daily progress">
+        <span>Today</span>
+        <strong><span id="completed-count">0</span><small>/<span id="total-count">0</span></small></strong>
+        <p>habits complete</p>
+        <div class="progress-track" aria-hidden="true"><span id="progress-fill"></span></div>
+      </div>
+    </header>
+
+    <section class="habit-panel" aria-labelledby="habits-heading">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">YOUR ROUTINE</p>
+          <h2 id="habits-heading">Today’s habits</h2>
+        </div>
+        <span class="count" id="habit-count">Loading habits…</span>
+      </div>
+
+      <form class="add-form" id="add-form">
+        <label class="sr-only" for="habit-name">New habit</label>
+        <input id="habit-name" name="name" type="text" maxlength="100" placeholder="What would you like to make a habit?" required autofocus>
+        <button type="submit"><span aria-hidden="true">＋</span> Add habit</button>
+      </form>
+
+      <p class="message" id="message" aria-live="polite"></p>
+      <div class="habit-list" id="habit-list" aria-live="polite">
+        <div class="empty-state loading-state">
+          <span aria-hidden="true">✦</span>
+          <h3>Loading your garden…</h3>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>Made for steady days and small wins · Saved with Firebase</footer>
+
+  <template id="habit-template">
+    <article class="habit-item">
+      <div class="status-icon" aria-hidden="true"></div>
+      <div class="habit-copy">
+        <h3></h3>
+        <p>Status: <strong></strong></p>
+      </div>
+      <div class="habit-actions">
+        <button class="complete-button" type="button"></button>
+        <button class="delete-button" type="button">Delete</button>
+      </div>
+    </article>
+  </template>
+
+  <script type="module">
+    import { firebaseApp } from "{{ url_for('static', filename='firebase-config.js') }}";
+    import {
+      addDoc,
+      collection,
+      deleteDoc,
+      doc,
+      getFirestore,
+      onSnapshot,
+      orderBy,
+      query,
+      serverTimestamp,
+      updateDoc
+    } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+
+    const db = getFirestore(firebaseApp);
+    const habitsCollection = collection(db, "habits");
+    const addForm = document.querySelector("#add-form");
+    const nameInput = document.querySelector("#habit-name");
+    const habitList = document.querySelector("#habit-list");
+    const habitTemplate = document.querySelector("#habit-template");
+    const message = document.querySelector("#message");
+
+    function showMessage(text, isError = false) {
+      message.textContent = text;
+      message.classList.toggle("error", isError);
+      window.clearTimeout(showMessage.timer);
+      showMessage.timer = window.setTimeout(() => { message.textContent = ""; }, 3500);
+    }
+
+    function renderHabits(snapshot) {
+      const habits = snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() }));
+      const completed = habits.filter((habit) => habit.completed).length;
+      document.querySelector("#completed-count").textContent = completed;
+      document.querySelector("#total-count").textContent = habits.length;
+      document.querySelector("#habit-count").textContent = `${habits.length} ${habits.length === 1 ? "habit" : "habits"}`;
+      document.querySelector("#progress-fill").style.width = `${habits.length ? completed / habits.length * 100 : 0}%`;
+      habitList.replaceChildren();
+
+      if (!habits.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty-state";
+        empty.innerHTML = "<span aria-hidden='true'>✦</span><h3>Your garden is ready</h3><p>Add your first habit above and start growing.</p>";
+        habitList.append(empty);
+        return;
+      }
+
+      habits.forEach((habit, index) => {
+        const item = habitTemplate.content.firstElementChild.cloneNode(true);
+        item.dataset.habitId = habit.id;
+        item.classList.toggle("is-complete", Boolean(habit.completed));
+        item.querySelector(".status-icon").textContent = habit.completed ? "✓" : index + 1;
+        item.querySelector("h3").textContent = habit.name;
+        item.querySelector(".habit-copy strong").textContent = habit.completed ? "Completed" : "In progress";
+
+        const completeButton = item.querySelector(".complete-button");
+        completeButton.textContent = habit.completed ? "Mark incomplete" : "Complete";
+        completeButton.setAttribute("aria-label", `${habit.completed ? "Mark incomplete" : "Complete"} ${habit.name}`);
+        completeButton.addEventListener("click", async () => {
+          completeButton.disabled = true;
+          try {
+            await updateDoc(doc(db, "habits", habit.id), { completed: !habit.completed });
+            showMessage(habit.completed ? "Habit moved back to in progress." : "Nice work — habit completed!");
+          } catch (error) {
+            console.error(error);
+            completeButton.disabled = false;
+            showMessage("Firebase could not update this habit. Check the project permissions.", true);
+          }
+        });
+
+        const deleteButton = item.querySelector(".delete-button");
+        deleteButton.setAttribute("aria-label", `Delete ${habit.name}`);
+        deleteButton.addEventListener("click", async () => {
+          deleteButton.disabled = true;
+          try {
+            await deleteDoc(doc(db, "habits", habit.id));
+            showMessage("Habit deleted.");
+          } catch (error) {
+            console.error(error);
+            deleteButton.disabled = false;
+            showMessage("Firebase could not delete this habit. Check the project permissions.", true);
+          }
+        });
+        habitList.append(item);
+      });
+    }
+
+    addForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const name = nameInput.value.trim();
+      if (!name) return;
+      const submitButton = addForm.querySelector("button");
+      submitButton.disabled = true;
+      try {
+        await addDoc(habitsCollection, { name, completed: false, createdAt: serverTimestamp() });
+        addForm.reset();
+        nameInput.focus();
+        showMessage("Habit added.");
+      } catch (error) {
+        console.error(error);
+        showMessage("Firebase could not save this habit. Check the project permissions.", true);
+      } finally {
+        submitButton.disabled = false;
+      }
+    });
+
+    const habitsQuery = query(habitsCollection, orderBy("createdAt", "desc"));
+    onSnapshot(habitsQuery, renderHabits, (error) => {
+      console.error(error);
+      document.querySelector("#habit-count").textContent = "Connection error";
+      habitList.innerHTML = "<div class='empty-state error-state'><span aria-hidden='true'>!</span><h3>Firebase connection needed</h3><p>Sign in to Firebase and allow this app to read and write the habits collection.</p></div>";
+      showMessage("Could not load habits from Firebase.", true);
+    });
+  </script>
+</body>
+</html>
